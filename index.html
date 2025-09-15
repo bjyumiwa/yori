@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>寄り道の散歩ゲーム</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;700&display=swap" rel="stylesheet">
   <style>
     body{font-family:'Noto Sans JP',sans-serif;margin:0;min-height:100vh;
@@ -16,61 +15,89 @@
     .bounce{animation:bounce 1s infinite}
     @keyframes bounce{0%,100%{transform:translateY(-25%);animation-timing-function:cubic-bezier(.8,0,1,1)}
                      50%{transform:translateY(0);animation-timing-function:cubic-bezier(0,0,.2,1)}}
-    /* キャラの軽いボブ（ふわふわ演出） */
     .bob { animation: bob 2.6s ease-in-out infinite; }
     @keyframes bob { 0%{transform:translateY(0)} 50%{transform:translateY(-6px)} 100%{transform:translateY(0)} }
-    /* 左向きに固定（画像の左右反転） */
     .face-left { transform: scaleX(-1); }
   </style>
 </head>
 <body>
   <div id="root"></div>
 
-  <!-- React (production) -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <!-- Babel（JSX変換。将来ビルド導入で外せます） -->
   <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
 
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
-    // 画像パス（public/ から始める運用）
-    const CHAR_SRC = {
-      green:  "public/characters/green.png",
-      pink:   "public/characters/pink.png",
-      blue:   "public/characters/blue.png",
-      purple: "public/characters/purple.png",
+    // 各色の「候補パス」を上から順に試す（%20 はスペースのURLエンコード）
+    const CANDIDATE_SRC = {
+      green: [
+        "public/characters/green.png",
+        "public/characters/green_open.png",
+        "public/characters/green_closed.png"
+      ],
+      pink: [
+        "public/characters/pink.png",
+        "public/characters/pink_open.png",
+        "public/characters/pink_open%20-%20コピー.png"
+      ],
+      blue: [
+        "public/characters/blue.png",
+        "public/characters/blue_closed.png",
+        "public/characters/blue_closed%20-%20コピー.png"
+      ],
+      purple: [
+        "public/characters/purple.png",
+        "public/characters/purple_closed.png",
+        "public/characters/purple_closed%20-%20コピー.png"
+      ]
     };
 
-    // 画像が見つからない時は絵文字にフォールバック
-    const CharacterImg = ({ x, y, name, scale = 1, dragging = false }) => {
-      const [ok, setOk] = useState(true);
-      const size = 110; // 仕上がりサイズ（必要なら調整）
-      // ドラッグ時は少し拡大、左向き固定（scaleX(-1)）
-      const extra = dragging ? ' scale(1.12)' : '';
-      return ok ? (
-        <img
-          src={CHAR_SRC[name] || CHAR_SRC.green}
-          alt={name}
-          className="absolute z-10 select-none pointer-events-none drop-shadow-xl bob face-left"
-          style={{
-            left: x - size*0.5, top: y - size*0.75, // キャラの重心を足元寄りに
-            width: size, height: 'auto',
-            transform: `scaleX(-1) scale(${scale})${extra}`,
-            imageRendering: 'auto'
-          }}
-          onError={()=>setOk(false)}
-        />
-      ) : (
-        <div
-          className="absolute z-10 text-5xl bob"
-          style={{ left: x-24, top: y-48, transform: dragging ? 'scale(1.12)' : 'scale(1)' }}
-        >🙂</div>
+    // 画像がロードできるか順に確認し、最初に成功したURLを返す
+    const pickFirstAvailable = (urls)=>new Promise(resolve=>{
+      let i = 0;
+      const tryNext = ()=>{
+        if(i >= urls.length) return resolve(null);
+        const img = new Image();
+        img.onload = ()=>resolve(urls[i]);
+        img.onerror = ()=>{ i++; tryNext(); };
+        img.src = urls[i];
+      };
+      tryNext();
+    });
+
+    // 解決済みの実URLを保持
+    const useResolvedSources = ()=>{
+      const [map,setMap] = useState({});
+      useEffect(()=>{
+        (async ()=>{
+          const entries = await Promise.all(
+            Object.keys(CANDIDATE_SRC).map(async key=>{
+              const url = await pickFirstAvailable(CANDIDATE_SRC[key]);
+              return [key,url];
+            })
+          );
+          setMap(Object.fromEntries(entries));
+        })();
+      },[]);
+      return map;
+    };
+
+    const CharacterImg = ({ x, y, src, dragging=false }) => {
+      const size = 110;
+      if(!src){
+        return <div className="absolute z-10 text-5xl bob" style={{left:x-24, top:y-48, transform: dragging?'scale(1.12)':'scale(1)'}}>🙂</div>;
+      }
+      return (
+        <img src={src} alt="" className="absolute z-10 select-none pointer-events-none drop-shadow-xl bob face-left"
+             style={{left:x - size*0.5, top:y - size*0.75, width:size, height:'auto',
+                     transform: dragging ? 'scaleX(-1) scale(1.12)' : 'scaleX(-1)'}} />
       );
     };
 
     const WalkingGame = () => {
+      const srcMap = useResolvedSources(); // {green:URL, pink:URL, ...}
       const [currentScene, setCurrentScene] = useState(0);
       const [playerX, setPlayerX] = useState(400);
       const [playerY, setPlayerY] = useState(300);
@@ -196,7 +223,6 @@
         setCollectedItems([]); setGameOver(false); setCollectedInScene([]);
       };
 
-      // キャラ選択を保存
       const chooseChar = (name) => {
         setCharName(name);
         localStorage.setItem('yorimichi_char', name);
@@ -208,6 +234,7 @@
         <div className="game-container">
           <div className="mb-4 text-white text-center">
             <h1 className="text-4xl font-bold mb-4">🚶‍♂️ 寄り道の散歩ゲーム 🌸</h1>
+
             <div className="flex flex-col items-center gap-2">
               <div className="flex justify-center gap-6 text-lg bg-black/30 p-3 rounded-lg">
                 <div className="font-semibold">シーン: {currentScene+1}/10</div>
@@ -216,13 +243,14 @@
                 <div className="font-semibold">🎁 収集: {collectedItems.length}個</div>
               </div>
 
-              {/* キャラ選択バー */}
               <div className="flex items-center gap-3 bg-black/30 px-3 py-2 rounded-lg">
                 <span className="text-white text-sm">仲間をえらぶ：</span>
                 {["green","pink","blue","purple"].map((c)=>(
                   <button key={c} onClick={()=>chooseChar(c)}
-                          className={`rounded-lg p-1 bg-white ${charName===c?'ring-4 ring-yellow-300':''}`}>
-                    <img src={CHAR_SRC[c]} alt={c} className="w-12 h-12 object-contain face-left" />
+                          className={`rounded-lg p-1 bg-white ${localStorage.getItem('yorimichi_char')===c?'ring-4 ring-yellow-300':''}`}>
+                    {srcMap[c]
+                      ? <img src={srcMap[c]} alt={c} className="w-12 h-12 object-contain face-left" />
+                      : <span className="w-12 h-12 grid place-items-center">🙂</span>}
                   </button>
                 ))}
               </div>
@@ -233,8 +261,18 @@
             ref={gameRef}
             className="relative border-4 border-white rounded-lg overflow-hidden cursor-crosshair shadow-2xl"
             style={{width:'800px',height:'500px',background:scene.background}}
-            onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}
-            onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}
+            onMouseDown={()=>setIsDragging(true)} onMouseMove={(e)=>{ if(!isDragging) return;
+              const r=gameRef.current.getBoundingClientRect(), nx=e.clientX-r.left, ny=e.clientY-r.top;
+              setPlayerX(Math.max(50,Math.min(750,nx))); setPlayerY(Math.max(150,Math.min(450,ny)));
+              if(ny<350){ setGameMessage("道に戻りました！"); setIsWalking(true); }
+            }} onMouseUp={()=>setIsDragging(false)}
+            onTouchStart={(e)=>{e.preventDefault();setIsDragging(true);}}
+            onTouchMove={(e)=>{e.preventDefault(); if(!isDragging) return;
+              const t=e.touches[0], r=gameRef.current.getBoundingClientRect(), nx=t.clientX-r.left, ny=t.clientY-r.top;
+              setPlayerX(Math.max(50,Math.min(750,nx))); setPlayerY(Math.max(150,Math.min(450,ny)));
+              if(ny<350){ setGameMessage("道に戻りました！"); setIsWalking(true); }
+            }}
+            onTouchEnd={(e)=>{e.preventDefault();setIsDragging(false);}}
           >
             <div className="absolute top-0 left-0 w-full h-[350px] bg-gradient-to-b from-transparent to-yellow-200 opacity-30"></div>
 
@@ -260,14 +298,19 @@
               if(collectedInScene.includes(i)) return null;
               return (
                 <div key={i} className="absolute cursor-pointer hover:scale-125 transition-transform"
-                     style={{left:it.x,top:it.y}} onClick={()=>collectItem(it,i)}>
+                     style={{left:it.x,top:it.y}} onClick={()=>{ 
+                        setCollectedItems(ci=>[...ci,it]); 
+                        setCollectedInScene(cs=>[...cs,i]); 
+                        setScore(s=>s+10);
+                        const names={mushroom:"きのこ",squirrel:"リス",acorn:"どんぐり"};
+                        setGameMessage(`${it.emoji} ${(names[it.type]||'アイテム')}を見つけた！+10点`);
+                     }}>
                   <div className="text-4xl pulse">{it.emoji}</div>
                 </div>
               );
             })}
 
-            {/* ここでキャラを描画（左向き固定） */}
-            <CharacterImg x={playerX} y={playerY} name={charName} dragging={isDragging} />
+            <CharacterImg x={playerX} y={playerY} src={srcMap[charName]} dragging={isDragging} />
 
             <div className="absolute top-2 right-2 bg-black/70 text-white p-3 rounded-lg">
               <div className="text-sm font-bold mb-1">収集したアイテム:</div>
@@ -287,22 +330,7 @@
             <div className="text-base text-gray-300">
               {gameOver ? "🎉 ゲームクリア！素晴らしい散歩でした！"
                         : isWalking ? "🚶‍♂️ 自動で歩いています。寄り道アイテムをクリックして収集しよう！"
-                                    : "👆 指でドラッグして道に戻してください！"}
-            </div>
-            {gameOver && (
-              <div className="mt-4">
-                <button className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg text-xl transition-colors bounce"
-                        onClick={restartGame}>🔄 もう一度散歩する</button>
-              </div>
-            )}
-          </div>
-
-          <div className="mt-4 text-white text-center max-w-[800px] bg-black/30 p-4 rounded-lg">
-            <div className="text-lg font-semibold mb-2">遊び方</div>
-            <div className="text-sm space-y-1">
-              <div>キャラクターは自動で歩きます。穴や崖に落ちたら、ドラッグで道に戻しましょう。</div>
-              <div>寄り道要素（花、虫、石など）をクリックして収集するとスコアが上がります。</div>
-              <div>10のシーンを進んでゴールを目指しましょう。</div>
+                                    : "指でドラッグして道に戻してください"}
             </div>
           </div>
         </div>
