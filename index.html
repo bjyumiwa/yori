@@ -12,12 +12,20 @@
     .game-container{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:20px}
     .pulse{animation:pulse 2s cubic-bezier(.4,0,.6,1) infinite}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
-    .bounce{animation:bounce 1s infinite}
-    @keyframes bounce{0%,100%{transform:translateY(-25%);animation-timing-function:cubic-bezier(.8,0,1,1)}
-                     50%{transform:translateY(0);animation-timing-function:cubic-bezier(0,0,.2,1)}}
     .bob { animation: bob 2.6s ease-in-out infinite; }
     @keyframes bob { 0%{transform:translateY(0)} 50%{transform:translateY(-6px)} 100%{transform:translateY(0)} }
     .face-left { transform: scaleX(-1); }
+    /* 吸い込み穴の視覚効果 */
+    .hole{position:absolute;border-radius:50%;overflow:hidden}
+    .hole::before,
+    .hole::after{
+      content:"";position:absolute;inset:-20%;border-radius:50%;
+      background: conic-gradient(from 0deg, rgba(255,255,255,.06), rgba(0,0,0,0) 30%, rgba(255,255,255,.06) 60%, rgba(0,0,0,0) 90%);
+      animation:spin 2.5s linear infinite;
+      filter: blur(4px);
+    }
+    .hole::after{animation-duration:4s;opacity:.6}
+    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
 <body>
@@ -28,46 +36,61 @@
   <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
 
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+    const { useState, useEffect, useRef, useMemo } = React;
 
-    // 各色の「候補パス」を上から順に試す（%20 はスペースのURLエンコード）
-    const CANDIDATE_SRC = {
-      green: [
-        "public/characters/green.png",
-        "public/characters/green_open.png",
-        "public/characters/green_closed.png"
-      ],
-      pink: [
-        "public/characters/pink.png",
-        "public/characters/pink_open.png",
-        "public/characters/pink_open%20-%20コピー.png"
-      ],
-      blue: [
-        "public/characters/blue.png",
-        "public/characters/blue_closed.png",
-        "public/characters/blue_closed%20-%20コピー.png"
-      ],
-      purple: [
-        "public/characters/purple.png",
-        "public/characters/purple_closed.png",
-        "public/characters/purple_closed%20-%20コピー.png"
-      ]
+    /* =========================
+       画像パスの自動解決
+    ========================= */
+    const repoPrefix = (()=>{ // プロジェクトページでも動くように
+      const seg = location.pathname.split('/').filter(Boolean)[0];
+      return seg ? `/${seg}/` : '/';
+    })();
+
+    const fileNames = {
+      green: ["green.png","green_open.png","green_closed.png"],
+      pink:  ["pink.png","pink_open.png","pink_open - コピー.png"],
+      blue:  ["blue.png","blue_closed.png","blue_closed - コピー.png"],
+      purple:["purple.png","purple_closed.png","purple_closed - コピー.png"],
     };
 
-    // 画像がロードできるか順に確認し、最初に成功したURLを返す
+    const bases = [
+      "", "./", "/", repoPrefix,
+      "public/characters/", "./public/characters/", repoPrefix+"public/characters/",
+      "characters/", "./characters/", repoPrefix+"characters/",
+      "public/assets/stage1/", "./public/assets/stage1/", repoPrefix+"public/assets/stage1/"
+    ];
+
+    function buildCandidates(color){
+      const enc = n=>n.replace(/ /g,"%20");
+      const names = fileNames[color] || [color+".png"];
+      const list = [];
+      for(const b of bases){
+        for(const n of names){
+          list.push(b.endsWith('/')? (b+enc(n)) : (b.replace(/\/?$/,'/')+enc(n)));
+        }
+      }
+      return Array.from(new Set(list));
+    }
+
+    const CANDIDATE_SRC = {
+      green: buildCandidates("green"),
+      pink:  buildCandidates("pink"),
+      blue:  buildCandidates("blue"),
+      purple:buildCandidates("purple")
+    };
+
     const pickFirstAvailable = (urls)=>new Promise(resolve=>{
-      let i = 0;
-      const tryNext = ()=>{
-        if(i >= urls.length) return resolve(null);
-        const img = new Image();
+      let i=0;
+      const tryNext=()=>{
+        if(i>=urls.length){ resolve(null); return; }
+        const img=new Image();
         img.onload = ()=>resolve(urls[i]);
-        img.onerror = ()=>{ i++; tryNext(); };
+        img.onerror= ()=>{ i++; tryNext(); };
         img.src = urls[i];
       };
       tryNext();
     });
 
-    // 解決済みの実URLを保持
     const useResolvedSources = ()=>{
       const [map,setMap] = useState({});
       useEffect(()=>{
@@ -75,6 +98,7 @@
           const entries = await Promise.all(
             Object.keys(CANDIDATE_SRC).map(async key=>{
               const url = await pickFirstAvailable(CANDIDATE_SRC[key]);
+              if(!url){ console.warn("キャラ画像未検出:", key, CANDIDATE_SRC[key]); }
               return [key,url];
             })
           );
@@ -84,23 +108,34 @@
       return map;
     };
 
-    const CharacterImg = ({ x, y, src, dragging=false }) => {
+    /* =========================
+       キャラ描画（吸い込み対応）
+    ========================= */
+    const CharacterImg = ({ x, y, src, scale=1, opacity=1, dragging=false }) => {
       const size = 110;
       if(!src){
-        return <div className="absolute z-10 text-5xl bob" style={{left:x-24, top:y-48, transform: dragging?'scale(1.12)':'scale(1)'}}>🙂</div>;
+        return <div className="absolute z-10 text-5xl bob"
+          style={{left:x-24, top:y-48, transform: dragging?'scale(1.12)':'scale(1)', opacity}}>🙂</div>;
       }
       return (
-        <img src={src} alt="" className="absolute z-10 select-none pointer-events-none drop-shadow-xl bob face-left"
-             style={{left:x - size*0.5, top:y - size*0.75, width:size, height:'auto',
-                     transform: dragging ? 'scaleX(-1) scale(1.12)' : 'scaleX(-1)'}} />
+        <img src={src} alt=""
+          className="absolute z-10 select-none pointer-events-none drop-shadow-xl bob face-left"
+          style={{
+            left:x - size*0.5, top:y - size*0.75, width:size, height:'auto',
+            transform:`scaleX(-1) scale(${dragging?1.12*scale:scale})`,
+            opacity
+          }}/>
       );
     };
 
+    /* =========================
+       本体
+    ========================= */
     const WalkingGame = () => {
-      const srcMap = useResolvedSources(); // {green:URL, pink:URL, ...}
+      const srcMap = useResolvedSources();
       const [currentScene, setCurrentScene] = useState(0);
-      const [playerX, setPlayerX] = useState(400);
-      const [playerY, setPlayerY] = useState(300);
+      const [playerX, setPlayerX] = useState(120);
+      const [playerY, setPlayerY] = useState(360);
       const [isWalking, setIsWalking] = useState(true);
       const [score, setScore] = useState(0);
       const [gameMessage, setGameMessage] = useState('散歩を始めましょう！');
@@ -111,9 +146,15 @@
       const [walkingSpeed] = useState(1.5);
       const [charName, setCharName] = useState(()=>localStorage.getItem('yorimichi_char') || 'green');
 
+      // 吸い込み演出用
+      const [falling, setFalling] = useState(false);
+      const [fallProg, setFallProg] = useState(0); // 0→1
+      const fallTarget = useRef({x:0,y:0});
+      const rafId = useRef(null);
+
       const gameRef = useRef(null);
 
-      const scenes = [
+      const scenes = useMemo(()=>[
         { name:"花畑の道", background:"linear-gradient(to bottom,#87CEEB,#98FB98)",
           obstacles:[{type:"hole",x:300,y:400,width:80,height:60},{type:"hole",x:500,y:350,width:70,height:50}],
           distractions:[{type:"flower",x:200,y:200,emoji:"🌸"},{type:"flower",x:600,y:250,emoji:"🌺"},{type:"butterfly",x:450,y:180,emoji:"🦋"}] },
@@ -144,26 +185,35 @@
         { name:"ゴール地点", background:"linear-gradient(to bottom,#FFD700,#FFA500)",
           obstacles:[{type:"final_pit",x:350,y:400,width:150,height:80}],
           distractions:[{type:"treasure",x:400,y:250,emoji:"🏆"},{type:"rainbow",x:300,y:150,emoji:"🌈"},{type:"celebration",x:200,y:200,emoji:"🎉"}] }
-      ];
+      ],[]);
 
       useEffect(()=>{ setCollectedInScene([]); },[currentScene]);
 
+      // 自動歩行 + 当たり判定
       useEffect(()=>{
         let id;
-        if(isWalking && !gameOver){
+        if(isWalking && !gameOver && !falling){
           id = setInterval(()=>{
             setPlayerX(prev=>{
               const newX = prev + walkingSpeed;
               const scene = scenes[currentScene];
-              let hit = false;
+              // 当たり判定
               for(const o of scene.obstacles){
-                if(newX>=o.x && newX<=o.x+o.width && playerY>=o.y && playerY<=o.y+o.height){
-                  const names={hole:"穴",cliff:"崖",river:"川",quicksand:"流砂",ice:"氷",final_pit:"最後の落とし穴"};
-                  setGameMessage(`${names[o.type]||o.type}に落ちた！ドラッグで戻して！`);
-                  setIsWalking(false); hit=true; break;
+                const inX = newX>=o.x && newX<=o.x+o.width;
+                const inY = playerY>=o.y && playerY<=o.y+o.height;
+                if(inX && inY){
+                  if(o.type==='hole' || o.type==='final_pit'){
+                    // 吸い込み演出
+                    startHoleSuction(o);
+                  }else{
+                    const names={hole:"穴",cliff:"崖",river:"川",quicksand:"流砂",ice:"氷",final_pit:"最後の落とし穴"};
+                    setGameMessage(`${names[o.type]||o.type}に落ちた！ドラッグで戻して！`);
+                    setIsWalking(false);
+                  }
+                  return prev;
                 }
               }
-              if(hit) return prev;
+              // シーン遷移
               if(newX>750){
                 if(currentScene<scenes.length-1){
                   setCurrentScene(s=>s+1);
@@ -180,80 +230,97 @@
           },50);
         }
         return ()=>clearInterval(id);
-      },[isWalking,currentScene,playerY,gameOver]);
+      },[isWalking,currentScene,playerY,gameOver,falling]);
 
-      const handleMouseDown=()=>setIsDragging(true);
-      const handleMouseMove=(e)=>{
+      // 吸い込みの実装
+      function startHoleSuction(o){
+        if(falling) return;
+        // 穴の中心へ
+        const cx = o.x + o.width/2;
+        const cy = o.y + o.height/2 + 6; // 少し下側へ
+        fallTarget.current = {x:cx, y:cy};
+        setFalling(true);
+        setIsWalking(false);
+        setGameMessage("あっ…油断した！穴に吸い込まれる…");
+        const start = performance.now();
+        const D = 700; // 吸い込み時間(ms)
+
+        cancelAnimationFrame(rafId.current);
+        const tick = (t)=>{
+          const p = Math.min(1, (t-start)/D);
+          // イージング（速→遅）
+          const ease = 1 - Math.pow(1-p, 3);
+          setPlayerX(x=> x + (cx - x) * 0.25); // 徐々に中心へ
+          setPlayerY(y=> y + (cy - y) * 0.25);
+          setFallProg(ease);
+          if(p<1){ rafId.current = requestAnimationFrame(tick); }
+          else{
+            // 吸い込み完了 → 落下した感じで待機
+            setGameMessage("落ちてしまった…ドラッグで道に戻ろう");
+          }
+        };
+        rafId.current = requestAnimationFrame(tick);
+      }
+
+      // ドラッグ操作（落下中でも復帰可能）
+      const startDrag = (e)=>{ setIsDragging(true); };
+      const moveDrag = (nx,ny)=>{
+        setPlayerX(Math.max(50,Math.min(750,nx)));
+        setPlayerY(Math.max(150,Math.min(450,ny)));
+        if(ny<350){
+          setGameMessage("道に戻りました！");
+          setIsWalking(true);
+          setFalling(false); setFallProg(0);
+        }
+      };
+      const onMouseMove=(e)=>{
         if(!isDragging) return;
-        const rect = gameRef.current.getBoundingClientRect();
-        const nx = e.clientX - rect.left;
-        const ny = e.clientY - rect.top;
-        setPlayerX(Math.max(50,Math.min(750,nx)));
-        setPlayerY(Math.max(150,Math.min(450,ny)));
-        if(ny<350){ setGameMessage("道に戻りました！"); setIsWalking(true); }
+        const r=gameRef.current.getBoundingClientRect();
+        moveDrag(e.clientX-r.left, e.clientY-r.top);
       };
-      const handleMouseUp=()=>setIsDragging(false);
-
-      const handleTouchStart=(e)=>{ e.preventDefault(); setIsDragging(true); };
-      const handleTouchMove=(e)=>{
+      const onTouchMove=(e)=>{
         e.preventDefault(); if(!isDragging) return;
-        const t=e.touches[0], rect=gameRef.current.getBoundingClientRect();
-        const nx=t.clientX-rect.left, ny=t.clientY-rect.top;
-        setPlayerX(Math.max(50,Math.min(750,nx)));
-        setPlayerY(Math.max(150,Math.min(450,ny)));
-        if(ny<350){ setGameMessage("道に戻りました！"); setIsWalking(true); }
+        const t=e.touches[0], r=gameRef.current.getBoundingClientRect();
+        moveDrag(t.clientX-r.left, t.clientY-r.top);
       };
-      const handleTouchEnd=(e)=>{ e.preventDefault(); setIsDragging(false); };
 
       const collectItem=(item, idx)=>{
         if(collectedInScene.includes(idx)) return;
         setCollectedItems(ci=>[...ci,item]);
         setCollectedInScene(cs=>[...cs,idx]);
         setScore(s=>s+10);
-        const names={flower:"お花",butterfly:"蝶々",mushroom:"きのこ",squirrel:"リス",acorn:"どんぐり",fish:"魚",stone:"石",frog:"カエル",
-                     crystal:"水晶",lizard:"トカゲ",cactus:"サボテン",sakura:"桜",bee:"蜂",picnic:"お弁当",firefly:"ホタル",owl:"フクロウ",
-                     moon:"お月様",camel:"ラクダ",oasis:"オアシス",snake:"ヘビ",snowman:"雪だるま",rabbit:"ウサギ",icicle:"つらら",
-                     panda:"パンダ",bamboo:"竹",dragonfly:"トンボ",treasure:"宝物",rainbow:"虹",celebration:"お祝い"};
-        setGameMessage(`${item.emoji} ${names[item.type]||item.type}を見つけた！+10点`);
-      };
-
-      const restartGame=()=>{
-        setCurrentScene(0); setPlayerX(400); setPlayerY(300); setIsWalking(true);
-        setScore(0); setGameMessage('散歩を始めましょう！'); setIsDragging(false);
-        setCollectedItems([]); setGameOver(false); setCollectedInScene([]);
-      };
-
-      const chooseChar = (name) => {
-        setCharName(name);
-        localStorage.setItem('yorimichi_char', name);
+        setGameMessage(`${item.emoji} を見つけた！+10点`);
       };
 
       const scene = scenes[currentScene];
+      const chooseChar = (name)=>{ setCharName(name); localStorage.setItem('yorimichi_char',name); };
+
+      // 吸い込み中のスケール・透明度
+      const fallScale = falling ? (1 - 0.75*fallProg) : 1;
+      const fallOpacity = falling ? (1 - 0.85*fallProg) : 1;
 
       return (
         <div className="game-container">
           <div className="mb-4 text-white text-center">
             <h1 className="text-4xl font-bold mb-4">🚶‍♂️ 寄り道の散歩ゲーム 🌸</h1>
 
-            <div className="flex flex-col items-center gap-2">
-              <div className="flex justify-center gap-6 text-lg bg-black/30 p-3 rounded-lg">
-                <div className="font-semibold">シーン: {currentScene+1}/10</div>
-                <div className="font-semibold">📍 {scene.name}</div>
-                <div className="font-semibold">🎯 スコア: {score}</div>
-                <div className="font-semibold">🎁 収集: {collectedItems.length}個</div>
-              </div>
+            <div className="flex items-center gap-3 bg-indigo-900/40 px-3 py-2 rounded-lg shadow">
+              <span className="text-white text-sm">仲間をえらぶ：</span>
+              {["green","pink","blue","purple"].map((c)=>(
+                <button key={c} onClick={()=>chooseChar(c)}
+                        className={`rounded-lg p-1 bg-white ${localStorage.getItem('yorimichi_char')===c?'ring-4 ring-yellow-300':''}`}>
+                  {srcMap[c]
+                    ? <img src={srcMap[c]} alt={c} className="w-12 h-12 object-contain face-left" />
+                    : <span className="w-12 h-12 grid place-items-center">🙂</span>}
+                </button>
+              ))}
+            </div>
 
-              <div className="flex items-center gap-3 bg-black/30 px-3 py-2 rounded-lg">
-                <span className="text-white text-sm">仲間をえらぶ：</span>
-                {["green","pink","blue","purple"].map((c)=>(
-                  <button key={c} onClick={()=>chooseChar(c)}
-                          className={`rounded-lg p-1 bg-white ${localStorage.getItem('yorimichi_char')===c?'ring-4 ring-yellow-300':''}`}>
-                    {srcMap[c]
-                      ? <img src={srcMap[c]} alt={c} className="w-12 h-12 object-contain face-left" />
-                      : <span className="w-12 h-12 grid place-items-center">🙂</span>}
-                  </button>
-                ))}
-              </div>
+            <div className="mt-3 flex justify-center gap-6 text-lg bg-black/30 p-3 rounded-lg">
+              <div className="font-semibold">シーン: {currentScene+1}/10</div>
+              <div className="font-semibold">📍 {scene.name}</div>
+              <div className="font-semibold">🎯 スコア: {score}</div>
+              <div className="font-semibold">🎁 収集: {collectedItems.length}個</div>
             </div>
           </div>
 
@@ -261,56 +328,42 @@
             ref={gameRef}
             className="relative border-4 border-white rounded-lg overflow-hidden cursor-crosshair shadow-2xl"
             style={{width:'800px',height:'500px',background:scene.background}}
-            onMouseDown={()=>setIsDragging(true)} onMouseMove={(e)=>{ if(!isDragging) return;
-              const r=gameRef.current.getBoundingClientRect(), nx=e.clientX-r.left, ny=e.clientY-r.top;
-              setPlayerX(Math.max(50,Math.min(750,nx))); setPlayerY(Math.max(150,Math.min(450,ny)));
-              if(ny<350){ setGameMessage("道に戻りました！"); setIsWalking(true); }
-            }} onMouseUp={()=>setIsDragging(false)}
-            onTouchStart={(e)=>{e.preventDefault();setIsDragging(true);}}
-            onTouchMove={(e)=>{e.preventDefault(); if(!isDragging) return;
-              const t=e.touches[0], r=gameRef.current.getBoundingClientRect(), nx=t.clientX-r.left, ny=t.clientY-r.top;
-              setPlayerX(Math.max(50,Math.min(750,nx))); setPlayerY(Math.max(150,Math.min(450,ny)));
-              if(ny<350){ setGameMessage("道に戻りました！"); setIsWalking(true); }
-            }}
-            onTouchEnd={(e)=>{e.preventDefault();setIsDragging(false);}}
+            onMouseDown={startDrag} onMouseMove={onMouseMove} onMouseUp={()=>setIsDragging(false)}
+            onTouchStart={(e)=>{e.preventDefault();startDrag();}} onTouchMove={onTouchMove} onTouchEnd={()=>setIsDragging(false)}
           >
             <div className="absolute top-0 left-0 w-full h-[350px] bg-gradient-to-b from-transparent to-yellow-200 opacity-30"></div>
 
-            {scene.obstacles.map((o,i)=>(
-              <div key={i}
-                className={`absolute border-2 border-red-600 ${
-                  o.type==='hole'?'bg-black rounded-full':
-                  o.type==='cliff'?'bg-gray-600':
-                  o.type==='river'?'bg-blue-400':
-                  o.type==='quicksand'?'bg-yellow-600':
-                  o.type==='ice'?'bg-blue-200':
-                  o.type==='final_pit'?'bg-red-800':'bg-gray-500'}`}
-                style={{left:o.x,top:o.y,width:o.width,height:o.height}}
-              >
-                <div className="text-center text-white text-xs font-bold p-1">
-                  {o.type==='hole'&&'穴'}{o.type==='cliff'&&'崖'}{o.type==='river'&&'川'}
-                  {o.type==='quicksand'&&'流砂'}{o.type==='ice'&&'氷'}{o.type==='final_pit'&&'落穴'}
+            {scene.obstacles.map((o,i)=>{
+              const baseClass =
+                o.type==='hole' ? 'bg-black/95' :
+                o.type==='cliff'? 'bg-gray-600' :
+                o.type==='river'? 'bg-blue-400' :
+                o.type==='quicksand'? 'bg-yellow-700' :
+                o.type==='ice'? 'bg-blue-200' :
+                o.type==='final_pit'? 'bg-red-900' : 'bg-gray-500';
+              const isHole = (o.type==='hole' || o.type==='final_pit');
+              return (
+                <div key={i}
+                  className={`absolute border-2 border-black/60 ${baseClass} ${isHole?'hole rounded-full':''}`}
+                  style={{left:o.x, top:o.y, width:o.width, height:o.height, borderRadius: isHole?'9999px':'0'}}
+                >
+                  {/* 見出しは非表示にしました（演出優先） */}
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             {scene.distractions.map((it,i)=>{
               if(collectedInScene.includes(i)) return null;
               return (
                 <div key={i} className="absolute cursor-pointer hover:scale-125 transition-transform"
-                     style={{left:it.x,top:it.y}} onClick={()=>{ 
-                        setCollectedItems(ci=>[...ci,it]); 
-                        setCollectedInScene(cs=>[...cs,i]); 
-                        setScore(s=>s+10);
-                        const names={mushroom:"きのこ",squirrel:"リス",acorn:"どんぐり"};
-                        setGameMessage(`${it.emoji} ${(names[it.type]||'アイテム')}を見つけた！+10点`);
-                     }}>
+                     style={{left:it.x,top:it.y}} onClick={()=>collectItem(it,i)}>
                   <div className="text-4xl pulse">{it.emoji}</div>
                 </div>
               );
             })}
 
-            <CharacterImg x={playerX} y={playerY} src={srcMap[charName]} dragging={isDragging} />
+            <CharacterImg x={playerX} y={playerY} src={srcMap[charName]}
+              dragging={isDragging} scale={fallScale} opacity={fallOpacity} />
 
             <div className="absolute top-2 right-2 bg-black/70 text-white p-3 rounded-lg">
               <div className="text-sm font-bold mb-1">収集したアイテム:</div>
