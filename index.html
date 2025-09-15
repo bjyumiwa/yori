@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>寄り道の散歩ゲーム</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;700&display=swap" rel="stylesheet">
+  <style>
+    body{font-family:'Noto Sans JP',sans-serif;margin:0;min-height:100vh;
+      background:linear-gradient(135deg,#667eea 0%,#764ba2 100%)}
+    .game-container{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+    .pulse{animation:pulse 2s cubic-bezier(.4,0,.6,1) infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+    .bounce{animation:bounce 1s infinite}
+    @keyframes bounce{0%,100%{transform:translateY(-25%);animation-timing-function:cubic-bezier(.8,0,1,1)}
+                     50%{transform:translateY(0);animation-timing-function:cubic-bezier(0,0,.2,1)}}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React (production) -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel (JSX変換用。将来はビルド導入で外せます) -->
+  <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const WalkingGame = () => {
+      const [currentScene, setCurrentScene] = useState(0);
+      const [playerX, setPlayerX] = useState(400);
+      const [playerY, setPlayerY] = useState(300);
+      const [isWalking, setIsWalking] = useState(true);
+      const [score, setScore] = useState(0);
+      const [gameMessage, setGameMessage] = useState('散歩を始めましょう！');
+      const [isDragging, setIsDragging] = useState(false);
+      const [collectedItems, setCollectedItems] = useState([]);
+      const [gameOver, setGameOver] = useState(false);
+      const [collectedInScene, setCollectedInScene] = useState([]);
+      const [walkingSpeed] = useState(1.5);
+      const gameRef = useRef(null);
+
+      const scenes = [
+        { name:"花畑の道", background:"linear-gradient(to bottom,#87CEEB,#98FB98)",
+          obstacles:[{type:"hole",x:300,y:400,width:80,height:60},{type:"hole",x:500,y:350,width:70,height:50}],
+          distractions:[{type:"flower",x:200,y:200,emoji:"🌸"},{type:"flower",x:600,y:250,emoji:"🌺"},{type:"butterfly",x:450,y:180,emoji:"🦋"}] },
+        { name:"森の小道", background:"linear-gradient(to bottom,#228B22,#32CD32)",
+          obstacles:[{type:"cliff",x:0,y:450,width:200,height:100},{type:"hole",x:400,y:380,width:90,height:70}],
+          distractions:[{type:"mushroom",x:150,y:300,emoji:"🍄"},{type:"squirrel",x:550,y:200,emoji:"🐿️"},{type:"acorn",x:350,y:250,emoji:"🌰"}] },
+        { name:"川辺の道", background:"linear-gradient(to bottom,#87CEEB,#ADD8E6)",
+          obstacles:[{type:"river",x:100,y:400,width:600,height:80},{type:"hole",x:250,y:300,width:60,height:50}],
+          distractions:[{type:"fish",x:400,y:440,emoji:"🐠"},{type:"stone",x:180,y:350,emoji:"🪨"},{type:"frog",x:520,y:380,emoji:"🐸"}] },
+        { name:"岩場の道", background:"linear-gradient(to bottom,#D2691E,#CD853F)",
+          obstacles:[{type:"cliff",x:600,y:300,width:200,height:200},{type:"hole",x:200,y:400,width:100,height:80},{type:"hole",x:450,y:350,width:80,height:60}],
+          distractions:[{type:"crystal",x:320,y:250,emoji:"💎"},{type:"lizard",x:150,y:300,emoji:"🦎"},{type:"cactus",x:550,y:200,emoji:"🌵"}] },
+        { name:"お花見の道", background:"linear-gradient(to bottom,#FFB6C1,#FFC0CB)",
+          obstacles:[{type:"hole",x:350,y:380,width:120,height:90},{type:"cliff",x:0,y:420,width:150,height:80}],
+          distractions:[{type:"sakura",x:200,y:150,emoji:"🌸"},{type:"sakura",x:500,y:200,emoji:"🌸"},{type:"bee",x:400,y:250,emoji:"🐝"},{type:"picnic",x:300,y:300,emoji:"🧺"}] },
+        { name:"夕暮れの道", background:"linear-gradient(to bottom,#FF6347,#FF7F50)",
+          obstacles:[{type:"hole",x:250,y:350,width:80,height:70},{type:"cliff",x:500,y:400,width:300,height:100}],
+          distractions:[{type:"firefly",x:180,y:280,emoji:"✨"},{type:"owl",x:450,y:200,emoji:"🦉"},{type:"moon",x:600,y:150,emoji:"🌙"}] },
+        { name:"砂漠の道", background:"linear-gradient(to bottom,#F4A460,#DEB887)",
+          obstacles:[{type:"quicksand",x:200,y:380,width:150,height:100},{type:"cliff",x:550,y:350,width:250,height:150},{type:"hole",x:400,y:320,width:70,height:60}],
+          distractions:[{type:"camel",x:150,y:250,emoji:"🐪"},{type:"oasis",x:500,y:200,emoji:"🏝️"},{type:"snake",x:350,y:280,emoji:"🐍"}] },
+        { name:"雪の道", background:"linear-gradient(to bottom,#E6E6FA,#F0F8FF)",
+          obstacles:[{type:"ice",x:300,y:350,width:200,height:120},{type:"hole",x:150,y:400,width:90,height:70}],
+          distractions:[{type:"snowman",x:200,y:250,emoji:"⛄"},{type:"rabbit",x:450,y:280,emoji:"🐰"},{type:"icicle",x:550,y:200,emoji:"🧊"}] },
+        { name:"竹林の道", background:"linear-gradient(to bottom,#228B22,#90EE90)",
+          obstacles:[{type:"hole",x:250,y:380,width:100,height:80},{type:"cliff",x:500,y:420,width:300,height:80}],
+          distractions:[{type:"panda",x:180,y:280,emoji:"🐼"},{type:"bamboo",x:400,y:200,emoji:"🎋"},{type:"dragonfly",x:350,y:250,emoji:"🪰"}] },
+        { name:"ゴール地点", background:"linear-gradient(to bottom,#FFD700,#FFA500)",
+          obstacles:[{type:"final_pit",x:350,y:400,width:150,height:80}],
+          distractions:[{type:"treasure",x:400,y:250,emoji:"🏆"},{type:"rainbow",x:300,y:150,emoji:"🌈"},{type:"celebration",x:200,y:200,emoji:"🎉"}] }
+      ];
+
+      useEffect(()=>{ setCollectedInScene([]); },[currentScene]);
+
+      useEffect(()=>{
+        let id;
+        if(isWalking && !gameOver){
+          id = setInterval(()=>{
+            setPlayerX(prev=>{
+              const newX = prev + walkingSpeed;
+              const scene = scenes[currentScene];
+              let hit = false;
+              for(const o of scene.obstacles){
+                if(newX>=o.x && newX<=o.x+o.width && playerY>=o.y && playerY<=o.y+o.height){
+                  const names={hole:"穴",cliff:"崖",river:"川",quicksand:"流砂",ice:"氷",final_pit:"最後の落とし穴"};
+                  setGameMessage(`${names[o.type]||o.type}に落ちた！ドラッグで戻して！`);
+                  setIsWalking(false); hit=true; break;
+                }
+              }
+              if(hit) return prev;
+              if(newX>750){
+                if(currentScene<scenes.length-1){
+                  setCurrentScene(s=>s+1);
+                  setGameMessage(`${scenes[currentScene+1]?.name}に到着！`);
+                  return 50;
+                }else{
+                  setGameMessage("おめでとう！ゴールです！🎉");
+                  setIsWalking(false); setGameOver(true);
+                  return prev;
+                }
+              }
+              return newX;
+            });
+          },50);
+        }
+        return ()=>clearInterval(id);
+      },[isWalking,currentScene,playerY,gameOver]);
+
+      const handleMouseDown=()=>setIsDragging(true);
+      const handleMouseMove=(e)=>{
+        if(!isDragging) return;
+        const rect = gameRef.current.getBoundingClientRect();
+        const nx = e.clientX - rect.left;
+        const ny = e.clientY - rect.top;
+        setPlayerX(Math.max(50,Math.min(750,nx)));
+        setPlayerY(Math.max(150,Math.min(450,ny)));
+        if(ny<350){ setGameMessage("道に戻りました！"); setIsWalking(true); }
+      };
+      const handleMouseUp=()=>setIsDragging(false);
+
+      const handleTouchStart=(e)=>{ e.preventDefault(); setIsDragging(true); };
+      const handleTouchMove=(e)=>{
+        e.preventDefault(); if(!isDragging) return;
+        const t=e.touches[0], rect=gameRef.current.getBoundingClientRect();
+        const nx=t.clientX-rect.left, ny=t.clientY-rect.top;
+        setPlayerX(Math.max(50,Math.min(750,nx)));
+        setPlayerY(Math.max(150,Math.min(450,ny)));
+        if(ny<350){ setGameMessage("道に戻りました！"); setIsWalking(true); }
+      };
+      const handleTouchEnd=(e)=>{ e.preventDefault(); setIsDragging(false); };
+
+      const collectItem=(item, idx)=>{
+        if(collectedInScene.includes(idx)) return;
+        setCollectedItems(ci=>[...ci,item]);
+        setCollectedInScene(cs=>[...cs,idx]);
+        setScore(s=>s+10);
+        const names={flower:"お花",butterfly:"蝶々",mushroom:"きのこ",squirrel:"リス",acorn:"どんぐり",fish:"魚",stone:"石",frog:"カエル",
+                     crystal:"水晶",lizard:"トカゲ",cactus:"サボテン",sakura:"桜",bee:"蜂",picnic:"お弁当",firefly:"ホタル",owl:"フクロウ",
+                     moon:"お月様",camel:"ラクダ",oasis:"オアシス",snake:"ヘビ",snowman:"雪だるま",rabbit:"ウサギ",icicle:"つらら",
+                     panda:"パンダ",bamboo:"竹",dragonfly:"トンボ",treasure:"宝物",rainbow:"虹",celebration:"お祝い"};
+        setGameMessage(`${item.emoji} ${names[item.type]||item.type}を見つけた！+10点`);
+      };
+
+      const restartGame=()=>{
+        setCurrentScene(0); setPlayerX(400); setPlayerY(300); setIsWalking(true);
+        setScore(0); setGameMessage('散歩を始めましょう！'); setIsDragging(false);
+        setCollectedItems([]); setGameOver(false); setCollectedInScene([]);
+      };
+
+      const scene = scenes[currentScene];
+
+      return (
+        <div className="game-container">
+          <div className="mb-4 text-white text-center">
+            <h1 className="text-4xl font-bold mb-4">🚶‍♂️ 寄り道の散歩ゲーム 🌸</h1>
+            <div className="flex justify-center gap-6 text-lg bg-black/30 p-3 rounded-lg">
+              <div className="font-semibold">シーン: {currentScene+1}/10</div>
+              <div className="font-semibold">📍 {scene.name}</div>
+              <div className="font-semibold">🎯 スコア: {score}</div>
+              <div className="font-semibold">🎁 収集: {collectedItems.length}個</div>
+            </div>
+          </div>
+
+          <div
+            ref={gameRef}
+            className="relative border-4 border-white rounded-lg overflow-hidden cursor-crosshair shadow-2xl"
+            style={{width:'800px',height:'500px',background:scene.background}}
+            onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}
+            onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}
+          >
+            <div className="absolute top-0 left-0 w-full h-[350px] bg-gradient-to-b from-transparent to-yellow-200 opacity-30"></div>
+
+            {scene.obstacles.map((o,i)=>(
+              <div key={i}
+                className={`absolute border-2 border-red-600 ${
+                  o.type==='hole'?'bg-black rounded-full':
+                  o.type==='cliff'?'bg-gray-600':
+                  o.type==='river'?'bg-blue-400':
+                  o.type==='quicksand'?'bg-yellow-600':
+                  o.type==='ice'?'bg-blue-200':
+                  o.type==='final_pit'?'bg-red-800':'bg-gray-500'}`}
+                style={{left:o.x,top:o.y,width:o.width,height:o.height}}
+              >
+                <div className="text-center text-white text-xs font-bold p-1">
+                  {o.type==='hole'&&'穴'}{o.type==='cliff'&&'崖'}{o.type==='river'&&'川'}
+                  {o.type==='quicksand'&&'流砂'}{o.type==='ice'&&'氷'}{o.type==='final_pit'&&'落穴'}
+                </div>
+              </div>
+            ))}
+
+            {scene.distractions.map((it,i)=>{
+              if(collectedInScene.includes(i)) return null;
+              return (
+                <div key={i} className="absolute cursor-pointer hover:scale-125 transition-transform"
+                     style={{left:it.x,top:it.y}} onClick={()=>collectItem(it,i)}>
+                  <div className="text-4xl pulse">{it.emoji}</div>
+                </div>
+              );
+            })}
+
+            <div className="absolute text-4xl transition-all duration-200 z-10"
+                 style={{left:(playerX-20),top:(playerY-20),transform:isDragging?'scale(1.3)':'scale(1)'}}>
+              🚶‍♂️
+            </div>
+
+            <div className="absolute top-2 right-2 bg-black/70 text-white p-3 rounded-lg">
+              <div className="text-sm font-bold mb-1">収集したアイテム:</div>
+              <div className="flex flex-wrap gap-1 max-w-[200px]">
+                {collectedItems.slice(-12).map((it,i)=>(<span key={i} className="text-2xl">{it.emoji}</span>))}
+              </div>
+            </div>
+
+            <div className="absolute bottom-2 left-2 right-2 h-3 bg-black/30 rounded-full">
+              <div className="h-full bg-green-400 rounded-full transition-all duration-300"
+                   style={{width: ((currentScene+1)/scenes.length*100)+'%'}}></div>
+            </div>
+          </div>
+
+          <div className="mt-4 text-white text-center bg-black/50 p-6 rounded-lg max-w-[800px]">
+            <div className="text-2xl font-bold mb-2">{gameMessage}</div>
+            <div className="text-base text-gray-300">
+              {gameOver ? "🎉 ゲームクリア！素晴らしい散歩でした！"
+                        : isWalking ? "🚶‍♂️ 自動で歩いています。寄り道アイテムをクリックして収集しよう！"
+                                    : "👆 指でドラッグして道に戻してください！"}
+            </div>
+            {gameOver && (
+              <div className="mt-4">
+                <button className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg text-xl transition-colors bounce"
+                        onClick={restartGame}>🔄 もう一度散歩する</button>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 text-white text-center max-w-[800px] bg-black/30 p-4 rounded-lg">
+            <div className="text-lg font-semibold mb-2">🎮 遊び方</div>
+            <div className="text-sm space-y-1">
+              <div>👆 キャラクターは自動で歩きます。穴や崖に落ちたら、ドラッグして道に戻しましょう！</div>
+              <div>✨ 寄り道要素（花、虫、石など）をクリックして収集するとスコアがアップします！</div>
+              <div>🏆 10のシーンを全てクリアしてゴールを目指しましょう！</div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<WalkingGame />);
+  </script>
+</body>
+</html>
