@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Choose — Yorimichi</title>
+  <link rel="stylesheet" href="public/css.css">
+</head>
+<body>
+  <div class="container">
+    <div class="card" style="text-align:center">
+      <h2 data-t="chooseChar">いっしょに歩く仲間をえらんでください</h2>
+
+      <div class="grid">
+        <div class="tile">
+          <img src="public/characters/blue_closed.png" alt="Blue">
+          <button class="primary" data-pick="blue">Blue</button>
+        </div>
+        <div class="tile">
+          <img src="public/characters/green_closed.png" alt="Green">
+          <button class="primary" data-pick="green">Green</button>
+        </div>
+        <div class="tile">
+          <img src="public/characters/pink_open.png" alt="Pink">
+          <button class="primary" data-pick="pink">Pink</button>
+        </div>
+        <div class="tile">
+          <img src="public/characters/purple_closed.png" alt="Purple">
+          <button class="primary" data-pick="purple">Purple</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <button onclick="go('index.html')" data-t="toMenu">メニューに戻る</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="public/js_i18n.js"></script>
+  <script src="public/js_state.js"></script>
+  <script>
+    // 多言語テキスト反映
+    applyTexts();
+
+    // キャラ選択 → 保存して game.html へ
+    document.querySelectorAll("[data-pick]").forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const color = btn.dataset.pick;
+        Y_STATE.set('yorimichi.character', color);
+        Y_STATE.set('yorimichi.stage', 1);
+        Y_STATE.set('yorimichi.attachment', 0);
+        // 初期スプライト（open/closed）も記録しておくと次画面で迷わない
+        const initialSprite = (color==='pink') ? 'open' : 'closed';
+        Y_STATE.set('yorimichi.sprite', initialSprite);
+        go('game.html');
+      });
+    });
+  </script>
+</body>
+</html>
